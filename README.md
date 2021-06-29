@@ -1,0 +1,1 @@
+# mapi-capi-static-converter
