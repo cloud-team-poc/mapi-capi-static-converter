@@ -139,7 +139,7 @@ func convertKMSKeyToCAPI(kmsKey mapi.AWSResourceReference) string {
 	}
 
 	if kmsKey.ARN != nil {
-		return *kmsKey.ID
+		return *kmsKey.ARN
 	}
 
 	return ""
