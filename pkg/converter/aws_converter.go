@@ -7,6 +7,7 @@ import (
 	"github.com/cloud-team-poc/mapi-capi-static-converter/pkg/capi"
 	"github.com/cloud-team-poc/mapi-capi-static-converter/pkg/mapi"
 	"github.com/cloud-team-poc/mapi-capi-static-converter/pkg/util"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -37,6 +38,14 @@ func (converter *AWSConverter) ToCAPI() ([]byte, error) {
 	}
 
 	capiAWSTemplate := &capi.AWSMachineTemplate{}
+	capiAWSTemplate.ObjectMeta = metav1.ObjectMeta{
+		Name:      machine.Name,
+		Namespace: machine.Namespace,
+	}
+	capiAWSTemplate.TypeMeta = metav1.TypeMeta{
+		Kind:       "AWSMachineTemplate",
+		APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
+	}
 	capiAWSTemplate.Spec.Template.Spec.AMI = convertAWSResourceReferenceToCAPI(mapiProviderConfig.AMI)
 	capiAWSTemplate.Spec.Template.Spec.InstanceType = mapiProviderConfig.InstanceType
 	capiAWSTemplate.Spec.Template.Spec.AdditionalTags = convertAWSTagsToCAPI(mapiProviderConfig.Tags)
