@@ -3,6 +3,7 @@ module github.com/cloud-team-poc/mapi-capi-static-converter
 go 1.16
 
 require (
+	github.com/onsi/gomega v1.13.0
 	k8s.io/api v0.21.2
 	k8s.io/apimachinery v0.21.2
 	k8s.io/utils v0.0.0-20210527160623-6fdb442a123b

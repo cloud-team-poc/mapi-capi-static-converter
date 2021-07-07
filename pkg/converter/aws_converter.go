@@ -47,10 +47,28 @@ func (converter *AWSConverter) ToCAPI() ([][]byte, error) {
 		return nil, err
 	}
 
+	capiAWSTemplate := convertProviderConfigToAWSMachineTemplate(machineSet.Name, machineSet.Namespace, mapiProviderConfig)
+
+	capiMachineSet := convertMachineSetToCAPI(machineSet)
+
+	yamlCAPIAWSTemplate, err := yaml.Marshal(capiAWSTemplate)
+	if err != nil {
+		return nil, err
+	}
+
+	yamlCAPIMachineSet, err := yaml.Marshal(capiMachineSet)
+	if err != nil {
+		return nil, err
+	}
+
+	return [][]byte{yamlCAPIAWSTemplate, yamlCAPIMachineSet}, nil
+}
+
+func convertProviderConfigToAWSMachineTemplate(name, namespace string, mapiProviderConfig *mapi.AWSMachineProviderConfig) *capi.AWSMachineTemplate {
 	capiAWSTemplate := &capi.AWSMachineTemplate{}
 	capiAWSTemplate.ObjectMeta = metav1.ObjectMeta{
-		Name:      machineSet.Name,
-		Namespace: machineSet.Namespace,
+		Name:      name,
+		Namespace: namespace,
 	}
 	capiAWSTemplate.TypeMeta = metav1.TypeMeta{
 		Kind:       awsTemplateKind,
@@ -72,40 +90,7 @@ func (converter *AWSConverter) ToCAPI() ([][]byte, error) {
 	capiAWSTemplate.Spec.Template.Spec.RootVolume = rootVolume
 	capiAWSTemplate.Spec.Template.Spec.NonRootVolumes = nonRootVolumes
 
-	capiMachineSet := &capi.MachineSet{}
-	capiMachineSet.ObjectMeta = metav1.ObjectMeta{
-		Name:      machineSet.Name,
-		Namespace: machineSet.Namespace,
-	}
-	capiMachineSet.TypeMeta = metav1.TypeMeta{
-		Kind:       capiMachineSetKind,
-		APIVersion: capiMachineSetAPIVersion,
-	}
-	capiMachineSet.Spec.Selector = machineSet.Spec.Selector
-	capiMachineSet.Spec.Template.Labels = machineSet.Spec.Template.Labels
-	capiMachineSet.Spec.ClusterName = "" // TODO: this should be fetched from infra object
-	capiMachineSet.Spec.Replicas = machineSet.Spec.Replicas
-	capiMachineSet.Spec.Template.Spec.Bootstrap = capi.Bootstrap{
-		DataSecretName: pointer.String(workerUserDataSecretName),
-	}
-	capiMachineSet.Spec.Template.Spec.ClusterName = "" // TODO: this should be fetched from infra object
-	capiMachineSet.Spec.Template.Spec.InfrastructureRef = corev1.ObjectReference{
-		APIVersion: awsTemplateAPIVersion,
-		Kind:       awsTemplateKind,
-		Name:       machineSet.Name,
-	}
-
-	yamlCAPIAWSTemplate, err := yaml.Marshal(capiAWSTemplate)
-	if err != nil {
-		return nil, err
-	}
-
-	yamlCAPIMachineSet, err := yaml.Marshal(capiMachineSet)
-	if err != nil {
-		return nil, err
-	}
-
-	return [][]byte{yamlCAPIAWSTemplate, yamlCAPIMachineSet}, nil
+	return capiAWSTemplate
 }
 
 func convertAWSResourceReferenceToCAPI(mapiReference mapi.AWSResourceReference) capi.AWSResourceReference {
@@ -190,6 +175,33 @@ func convertKMSKeyToCAPI(kmsKey mapi.AWSResourceReference) string {
 	}
 
 	return ""
+}
+
+func convertMachineSetToCAPI(mapiMachineSet *mapi.MachineSet) *capi.MachineSet {
+	capiMachineSet := &capi.MachineSet{}
+	capiMachineSet.ObjectMeta = metav1.ObjectMeta{
+		Name:      mapiMachineSet.Name,
+		Namespace: mapiMachineSet.Namespace,
+	}
+	capiMachineSet.TypeMeta = metav1.TypeMeta{
+		Kind:       capiMachineSetKind,
+		APIVersion: capiMachineSetAPIVersion,
+	}
+	capiMachineSet.Spec.Selector = mapiMachineSet.Spec.Selector
+	capiMachineSet.Spec.Template.Labels = mapiMachineSet.Spec.Template.Labels
+	capiMachineSet.Spec.ClusterName = "" // TODO: this should be fetched from infra object
+	capiMachineSet.Spec.Replicas = mapiMachineSet.Spec.Replicas
+	capiMachineSet.Spec.Template.Spec.Bootstrap = capi.Bootstrap{
+		DataSecretName: pointer.String(workerUserDataSecretName),
+	}
+	capiMachineSet.Spec.Template.Spec.ClusterName = "" // TODO: this should be fetched from infra object
+	capiMachineSet.Spec.Template.Spec.InfrastructureRef = corev1.ObjectReference{
+		APIVersion: awsTemplateAPIVersion,
+		Kind:       awsTemplateKind,
+		Name:       mapiMachineSet.Name,
+	}
+
+	return capiMachineSet
 }
 
 func (converter *AWSConverter) ToMAPI() ([][]byte, error) {
