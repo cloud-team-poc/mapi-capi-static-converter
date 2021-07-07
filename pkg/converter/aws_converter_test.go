@@ -5,8 +5,131 @@ import (
 
 	"github.com/cloud-team-poc/mapi-capi-static-converter/pkg/mapi"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
 )
+
+func TestConvertProviderConfigToAWSMachineTemplate(t *testing.T) {
+	g := NewWithT(t)
+
+	name := "testName"
+	namespace := "testNamespace"
+	mapiProviderConfig := &mapi.AWSMachineProviderConfig{
+		AMI: mapi.AWSResourceReference{
+			ID: pointer.String("testID"),
+		},
+		InstanceType: "testInstanceType",
+		Tags: []mapi.TagSpecification{
+			{
+				Name:  "testName",
+				Value: "testValue",
+			},
+		},
+		IAMInstanceProfile: &mapi.AWSResourceReference{
+			ID: pointer.String("testID"),
+		},
+		KeyName: pointer.String("testKey"),
+		Placement: mapi.Placement{
+			AvailabilityZone: "zone",
+			Tenancy:          mapi.DefaultTenancy,
+		},
+		SecurityGroups: []mapi.AWSResourceReference{
+			{
+				ID: pointer.String("testID"),
+			},
+		},
+		Subnet: mapi.AWSResourceReference{
+			ID: pointer.String("testID"),
+		},
+		SpotMarketOptions: &mapi.SpotMarketOptions{
+			MaxPrice: pointer.String("1"),
+		},
+		BlockDevices: []mapi.BlockDeviceMappingSpec{
+			{
+				EBS: &mapi.EBSBlockDeviceSpec{
+					VolumeSize: pointer.Int64(1),
+					VolumeType: pointer.String("type1"),
+					Iops:       pointer.Int64(1),
+					Encrypted:  pointer.Bool(false),
+					KMSKey: mapi.AWSResourceReference{
+						ID: pointer.String("test1"),
+					},
+				},
+			},
+			{
+				DeviceName: pointer.String("nonrootdevice"),
+				EBS: &mapi.EBSBlockDeviceSpec{
+					VolumeSize: pointer.Int64(2),
+					VolumeType: pointer.String("type2"),
+					Iops:       pointer.Int64(2),
+					Encrypted:  pointer.Bool(false),
+					KMSKey: mapi.AWSResourceReference{
+						ID: pointer.String("test2"),
+					},
+				},
+			},
+		},
+	}
+
+	capiAWSMachineTemplate := convertProviderConfigToAWSMachineTemplate(name, namespace, mapiProviderConfig)
+
+	g.Expect(capiAWSMachineTemplate).ToNot(BeNil())
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.AMI).To(Equal(convertAWSResourceReferenceToCAPI(mapiProviderConfig.AMI)))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.InstanceType).To(Equal(mapiProviderConfig.InstanceType))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.AdditionalTags).To(Equal(convertAWSTagsToCAPI(mapiProviderConfig.Tags)))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.IAMInstanceProfile).To(Equal(*mapiProviderConfig.IAMInstanceProfile.ID))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.SSHKeyName).To(Equal(mapiProviderConfig.KeyName))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.PublicIP).To(Equal(mapiProviderConfig.PublicIP))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.FailureDomain).To(Equal(&mapiProviderConfig.Placement.AvailabilityZone))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.Tenancy).To(Equal(string(mapiProviderConfig.Placement.Tenancy)))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.AdditionalSecurityGroups).To(Equal(convertAWSSecurityGroupstoCAPI(mapiProviderConfig.SecurityGroups)))
+	capiSubnet := convertAWSResourceReferenceToCAPI(mapiProviderConfig.Subnet)
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.Subnet).To(Equal(&capiSubnet))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.SpotMarketOptions).To(Equal(convertAWSSpotMarketOptionsToCAPI(mapiProviderConfig.SpotMarketOptions)))
+	rootVolume, nonRootVolumes := convertAWSBlockDeviceMappingSpecToCAPI(mapiProviderConfig.BlockDevices)
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.RootVolume).To(Equal(rootVolume))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.NonRootVolumes).To(Equal(nonRootVolumes))
+}
+
+func TestConvertMachineSetToCAPI(t *testing.T) {
+	g := NewWithT(t)
+
+	mapiMachineSet := &mapi.MachineSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "testName",
+			Namespace: "testNamespace",
+		},
+		Spec: mapi.MachineSetSpec{
+			Replicas: pointer.Int32(1),
+			Selector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"label": "value"},
+			},
+			Template: mapi.MachineTemplateSpec{
+				Spec: mapi.MachineSpec{
+					ObjectMeta: mapi.ObjectMeta{
+						Labels: map[string]string{"label": "value"},
+					},
+				},
+			},
+		},
+	}
+
+	capiMachineSet := convertMachineSetToCAPI(mapiMachineSet)
+
+	g.Expect(capiMachineSet.Name).To(Equal(mapiMachineSet.Name))
+	g.Expect(capiMachineSet.Namespace).To(Equal(mapiMachineSet.Namespace))
+	g.Expect(capiMachineSet.Kind).To(Equal(capiMachineSetKind))
+	g.Expect(capiMachineSet.APIVersion).To(Equal(capiMachineSetAPIVersion))
+	g.Expect(capiMachineSet.Spec.Template.Labels).To(Equal(mapiMachineSet.Spec.Template.Labels))
+	g.Expect(capiMachineSet.Spec.Replicas).To(Equal(mapiMachineSet.Spec.Replicas))
+	g.Expect(capiMachineSet.Spec.Template.Spec.Bootstrap.DataSecretName).To(Equal(pointer.StringPtr(workerUserDataSecretName)))
+	g.Expect(capiMachineSet.Spec.Template.Spec.InfrastructureRef).To(Equal(corev1.ObjectReference{
+		APIVersion: awsTemplateAPIVersion,
+		Kind:       awsTemplateKind,
+		Name:       mapiMachineSet.Name,
+	}))
+}
 
 func TestConvertAWSResourceReferenceToCAPI(t *testing.T) {
 	g := NewWithT(t)

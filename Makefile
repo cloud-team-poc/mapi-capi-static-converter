@@ -14,5 +14,8 @@ help: ## Show this help screen
 build:  ## Compile the project
 	go build -o bin/${BIN_NAME}
 
+test: ## Test the project
+	go test ./pkg/...
+
 clean:
 	rm -rf bin/
