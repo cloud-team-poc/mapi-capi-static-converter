@@ -89,6 +89,10 @@ func convertProviderConfigToAWSMachineTemplate(name, namespace string, mapiProvi
 	rootVolume, nonRootVolumes := convertAWSBlockDeviceMappingSpecToCAPI(mapiProviderConfig.BlockDevices)
 	capiAWSTemplate.Spec.Template.Spec.RootVolume = rootVolume
 	capiAWSTemplate.Spec.Template.Spec.NonRootVolumes = nonRootVolumes
+	capiAWSTemplate.Spec.Template.Spec.CloudInit = capi.CloudInit{
+		InsecureSkipSecretsManager: false,
+		SecureSecretsBackend:       capi.SecretBackendSecretsManager,
+	}
 
 	return capiAWSTemplate
 }

@@ -3,6 +3,7 @@ package converter
 import (
 	"testing"
 
+	"github.com/cloud-team-poc/mapi-capi-static-converter/pkg/capi"
 	"github.com/cloud-team-poc/mapi-capi-static-converter/pkg/mapi"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -90,6 +91,10 @@ func TestConvertProviderConfigToAWSMachineTemplate(t *testing.T) {
 	rootVolume, nonRootVolumes := convertAWSBlockDeviceMappingSpecToCAPI(mapiProviderConfig.BlockDevices)
 	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.RootVolume).To(Equal(rootVolume))
 	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.NonRootVolumes).To(Equal(nonRootVolumes))
+	g.Expect(capiAWSMachineTemplate.Spec.Template.Spec.CloudInit).To(Equal(capi.CloudInit{
+		InsecureSkipSecretsManager: false,
+		SecureSecretsBackend:       capi.SecretBackendSecretsManager,
+	}))
 }
 
 func TestConvertMachineSetToCAPI(t *testing.T) {
