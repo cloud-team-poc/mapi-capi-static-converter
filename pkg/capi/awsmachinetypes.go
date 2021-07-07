@@ -6,12 +6,6 @@ import (
 	"sigs.k8s.io/cluster-api/errors"
 )
 
-const (
-	// MachineFinalizer allows ReconcileAWSMachine to clean up AWS resources associated with AWSMachine before
-	// removing it from the apiserver.
-	MachineFinalizer = "awsmachine.infrastructure.cluster.x-k8s.io"
-)
-
 // SecretBackend defines variants for backend secret storage.
 type SecretBackend string
 
