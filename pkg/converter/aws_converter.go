@@ -7,15 +7,25 @@ import (
 	"github.com/cloud-team-poc/mapi-capi-static-converter/pkg/capi"
 	"github.com/cloud-team-poc/mapi-capi-static-converter/pkg/mapi"
 	"github.com/cloud-team-poc/mapi-capi-static-converter/pkg/util"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/yaml"
+)
+
+const (
+	awsTemplateAPIVersion    = "infrastructure.cluster.x-k8s.io/v1alpha4"
+	awsTemplateKind          = "AWSMachineTemplate"
+	capiMachineSetAPIVersion = "cluster.x-k8s.io"
+	capiMachineSetKind       = "MachineSet"
+	workerUserDataSecretName = "worker-user-data"
 )
 
 type AWSConverter struct {
 	MachineFile []byte
 }
 
-func (converter *AWSConverter) ConvertAPI(apiType string) ([]byte, error) {
+func (converter *AWSConverter) ConvertAPI(apiType string) ([][]byte, error) {
 	switch apiType {
 	case "capi":
 		return converter.ToCAPI()
@@ -26,25 +36,25 @@ func (converter *AWSConverter) ConvertAPI(apiType string) ([]byte, error) {
 	}
 }
 
-func (converter *AWSConverter) ToCAPI() ([]byte, error) {
-	machine := &mapi.Machine{}
-	if err := yaml.Unmarshal(converter.MachineFile, machine); err != nil {
+func (converter *AWSConverter) ToCAPI() ([][]byte, error) {
+	machineSet := &mapi.MachineSet{}
+	if err := yaml.Unmarshal(converter.MachineFile, machineSet); err != nil {
 		return nil, fmt.Errorf("error unmarshalling machine: %v", err)
 	}
 
-	mapiProviderConfig, err := mapi.ProviderSpecFromRawExtension(machine.Spec.ProviderSpec.Value)
+	mapiProviderConfig, err := mapi.ProviderSpecFromRawExtension(machineSet.Spec.Template.Spec.ProviderSpec.Value)
 	if err != nil {
 		return nil, err
 	}
 
 	capiAWSTemplate := &capi.AWSMachineTemplate{}
 	capiAWSTemplate.ObjectMeta = metav1.ObjectMeta{
-		Name:      machine.Name,
-		Namespace: machine.Namespace,
+		Name:      machineSet.Name,
+		Namespace: machineSet.Namespace,
 	}
 	capiAWSTemplate.TypeMeta = metav1.TypeMeta{
-		Kind:       "AWSMachineTemplate",
-		APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha4",
+		Kind:       awsTemplateKind,
+		APIVersion: awsTemplateAPIVersion,
 	}
 	capiAWSTemplate.Spec.Template.Spec.AMI = convertAWSResourceReferenceToCAPI(mapiProviderConfig.AMI)
 	capiAWSTemplate.Spec.Template.Spec.InstanceType = mapiProviderConfig.InstanceType
@@ -62,12 +72,40 @@ func (converter *AWSConverter) ToCAPI() ([]byte, error) {
 	capiAWSTemplate.Spec.Template.Spec.RootVolume = rootVolume
 	capiAWSTemplate.Spec.Template.Spec.NonRootVolumes = nonRootVolumes
 
-	return yaml.Marshal(capiAWSTemplate)
-}
+	capiMachineSet := &capi.MachineSet{}
+	capiMachineSet.ObjectMeta = metav1.ObjectMeta{
+		Name:      machineSet.Name,
+		Namespace: machineSet.Namespace,
+	}
+	capiMachineSet.TypeMeta = metav1.TypeMeta{
+		Kind:       capiMachineSetKind,
+		APIVersion: capiMachineSetAPIVersion,
+	}
+	capiMachineSet.Spec.Selector = machineSet.Spec.Selector
+	capiMachineSet.Spec.Template.Labels = machineSet.Spec.Template.Labels
+	capiMachineSet.Spec.ClusterName = "" // TODO: this should be fetched from infra object
+	capiMachineSet.Spec.Replicas = machineSet.Spec.Replicas
+	capiMachineSet.Spec.Template.Spec.Bootstrap = capi.Bootstrap{
+		DataSecretName: pointer.String(workerUserDataSecretName),
+	}
+	capiMachineSet.Spec.Template.Spec.ClusterName = "" // TODO: this should be fetched from infra object
+	capiMachineSet.Spec.Template.Spec.InfrastructureRef = corev1.ObjectReference{
+		APIVersion: awsTemplateAPIVersion,
+		Kind:       awsTemplateKind,
+		Name:       machineSet.Name,
+	}
 
-func (converter *AWSConverter) ToMAPI() ([]byte, error) {
-	// TODO
-	return []byte{}, nil
+	yamlCAPIAWSTemplate, err := yaml.Marshal(capiAWSTemplate)
+	if err != nil {
+		return nil, err
+	}
+
+	yamlCAPIMachineSet, err := yaml.Marshal(capiMachineSet)
+	if err != nil {
+		return nil, err
+	}
+
+	return [][]byte{yamlCAPIAWSTemplate, yamlCAPIMachineSet}, nil
 }
 
 func convertAWSResourceReferenceToCAPI(mapiReference mapi.AWSResourceReference) capi.AWSResourceReference {
@@ -152,4 +190,9 @@ func convertKMSKeyToCAPI(kmsKey mapi.AWSResourceReference) string {
 	}
 
 	return ""
+}
+
+func (converter *AWSConverter) ToMAPI() ([][]byte, error) {
+	// TODO
+	return [][]byte{}, nil
 }

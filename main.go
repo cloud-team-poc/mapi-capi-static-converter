@@ -11,14 +11,12 @@ import (
 
 var (
 	inputFilePath     string
-	outputFilePath    string
 	conversionApiType string
 	cloudProviderName string
 )
 
 func init() {
 	flag.StringVar(&inputFilePath, "input", "input.yaml", "input machine file path")
-	flag.StringVar(&outputFilePath, "output", "output.yaml", "output machine file path")
 	flag.StringVar(&conversionApiType, "api", "", "api type to covert to, can be either capi or mapi")
 	flag.StringVar(&cloudProviderName, "provider", "", "cloud provider name, can be aws, azure, gcp, vsphere")
 }
@@ -26,7 +24,7 @@ func init() {
 func main() {
 	flag.Parse()
 
-	fmt.Printf("Converting a machine from %s, for cloud provider: %s\n", conversionApiType, conversionApiType)
+	fmt.Printf("Converting from %s, for cloud provider: %s\n", conversionApiType, cloudProviderName)
 
 	inputMachine, err := ioutil.ReadFile(inputFilePath)
 	if err != nil {
@@ -38,14 +36,16 @@ func main() {
 		panic(err)
 	}
 
-	convertedFile, err := converter.ConvertAPI(conversionApiType)
+	convertedTypes, err := converter.ConvertAPI(conversionApiType)
 	if err != nil {
 		panic(err)
 	}
 
-	err = ioutil.WriteFile(outputFilePath, convertedFile, 0644)
-	if err != nil {
-		panic(err)
+	for i, convertedType := range convertedTypes {
+		err = ioutil.WriteFile(fmt.Sprintf("output-%d.yaml", i), convertedType, 0644)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 
