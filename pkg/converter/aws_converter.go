@@ -9,6 +9,7 @@ import (
 	"github.com/cloud-team-poc/mapi-capi-static-converter/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/yaml"
 )
@@ -18,11 +19,14 @@ const (
 	awsTemplateKind          = "AWSMachineTemplate"
 	capiMachineSetAPIVersion = "cluster.x-k8s.io"
 	capiMachineSetKind       = "MachineSet"
+	mapiMachineSetKind       = "machine.openshift.io"
+	mapiMachineSetAPIVersion = "MachineSet"
 	workerUserDataSecretName = "worker-user-data"
 )
 
 type AWSConverter struct {
-	MachineFile []byte
+	MachineSetFile      []byte
+	MachineTemplateFile []byte
 }
 
 func (converter *AWSConverter) ConvertAPI(apiType string) ([][]byte, error) {
@@ -38,8 +42,8 @@ func (converter *AWSConverter) ConvertAPI(apiType string) ([][]byte, error) {
 
 func (converter *AWSConverter) ToCAPI() ([][]byte, error) {
 	machineSet := &mapi.MachineSet{}
-	if err := yaml.Unmarshal(converter.MachineFile, machineSet); err != nil {
-		return nil, fmt.Errorf("error unmarshalling machine: %v", err)
+	if err := yaml.Unmarshal(converter.MachineSetFile, machineSet); err != nil {
+		return nil, fmt.Errorf("error unmarshalling machineset: %v", err)
 	}
 
 	mapiProviderConfig, err := mapi.ProviderSpecFromRawExtension(machineSet.Spec.Template.Spec.ProviderSpec.Value)
@@ -209,6 +213,168 @@ func convertMachineSetToCAPI(mapiMachineSet *mapi.MachineSet) *capi.MachineSet {
 }
 
 func (converter *AWSConverter) ToMAPI() ([][]byte, error) {
-	// TODO
-	return [][]byte{}, nil
+	machineSet := &capi.MachineSet{}
+	if err := yaml.Unmarshal(converter.MachineSetFile, machineSet); err != nil {
+		return nil, fmt.Errorf("error unmarshalling machineset: %v", err)
+	}
+
+	machineTemplate := &capi.AWSMachineTemplate{}
+	if err := yaml.Unmarshal(converter.MachineTemplateFile, machineTemplate); err != nil {
+		return nil, fmt.Errorf("error unmarshalling machine template: %v", err)
+	}
+
+	mapiProviderConfig := convertAWSMachineTemplateToroviderConfig(machineTemplate)
+
+	rawProviderConfig, err := mapi.RawExtensionFromProviderSpec(mapiProviderConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	mapiMachineSet := convertMachineSetToMAPI(machineSet, rawProviderConfig)
+
+	yamlMAPIMachineSet, err := yaml.Marshal(mapiMachineSet)
+	if err != nil {
+		return nil, err
+	}
+
+	return [][]byte{yamlMAPIMachineSet}, nil
+}
+
+func convertAWSMachineTemplateToroviderConfig(awsMachineTemplate *capi.AWSMachineTemplate) *mapi.AWSMachineProviderConfig {
+	mapiProviderConfig := &mapi.AWSMachineProviderConfig{}
+
+	mapiProviderConfig.AMI = convertAWSResourceReferenceToMAPI(awsMachineTemplate.Spec.Template.Spec.AMI)
+	mapiProviderConfig.InstanceType = awsMachineTemplate.Spec.Template.Spec.InstanceType
+	mapiProviderConfig.Tags = convertAWSTagsToMAPI(awsMachineTemplate.Spec.Template.Spec.AdditionalTags)
+	mapiProviderConfig.IAMInstanceProfile = &mapi.AWSResourceReference{
+		ID: &awsMachineTemplate.Spec.Template.Spec.IAMInstanceProfile,
+	}
+	mapiProviderConfig.KeyName = awsMachineTemplate.Spec.Template.Spec.SSHKeyName
+	mapiProviderConfig.PublicIP = awsMachineTemplate.Spec.Template.Spec.PublicIP
+	mapiProviderConfig.Placement = mapi.Placement{
+		AvailabilityZone: util.DerefString(awsMachineTemplate.Spec.Template.Spec.FailureDomain),
+		Tenancy:          convertAWSTenancyToMAPI(awsMachineTemplate.Spec.Template.Spec.Tenancy),
+		Region:           "", // TODO: fetch region from cluster object
+	}
+	mapiProviderConfig.SecurityGroups = convertAWSSecurityGroupstoMAPI(awsMachineTemplate.Spec.Template.Spec.AdditionalSecurityGroups)
+	mapiProviderConfig.Subnet = convertAWSResourceReferenceToMAPI(*awsMachineTemplate.Spec.Template.Spec.Subnet)
+	mapiProviderConfig.SpotMarketOptions = convertAWSSpotMarketOptionsToMAPI(awsMachineTemplate.Spec.Template.Spec.SpotMarketOptions)
+	mapiProviderConfig.BlockDevices = convertAWSBlockDeviceMappingSpecToMAPI(awsMachineTemplate.Spec.Template.Spec.RootVolume, awsMachineTemplate.Spec.Template.Spec.NonRootVolumes)
+	return mapiProviderConfig
+}
+
+func convertAWSResourceReferenceToMAPI(mapiReference capi.AWSResourceReference) mapi.AWSResourceReference {
+	return mapi.AWSResourceReference{
+		ID:      mapiReference.ID,
+		ARN:     mapiReference.ARN,
+		Filters: convertAWSFiltersToMAPI(mapiReference.Filters),
+	}
+}
+
+func convertAWSFiltersToMAPI(capiFilters []capi.Filter) []mapi.Filter {
+	mapiFilters := []mapi.Filter{}
+	for _, filter := range capiFilters {
+		mapiFilters = append(mapiFilters, mapi.Filter{
+			Name:   filter.Name,
+			Values: filter.Values,
+		})
+	}
+	return mapiFilters
+}
+
+func convertAWSTagsToMAPI(capiTags capi.Tags) []mapi.TagSpecification {
+	mapiTags := []mapi.TagSpecification{}
+	for key, value := range capiTags {
+		mapiTags = append(mapiTags, mapi.TagSpecification{
+			Name:  key,
+			Value: value,
+		})
+	}
+	return mapiTags
+}
+
+func convertAWSTenancyToMAPI(capiTenancy string) mapi.InstanceTenancy {
+	switch capiTenancy {
+	case "default":
+		return mapi.DefaultTenancy
+	case "dedicated":
+		return mapi.DedicatedTenancy
+	default:
+		return mapi.HostTenancy
+	}
+}
+
+func convertAWSSecurityGroupstoMAPI(sgs []capi.AWSResourceReference) []mapi.AWSResourceReference {
+	mapiSGs := []mapi.AWSResourceReference{}
+	for _, sg := range sgs {
+		mapiSGs = append(mapiSGs, convertAWSResourceReferenceToMAPI(sg))
+	}
+	return mapiSGs
+}
+
+func convertAWSSpotMarketOptionsToMAPI(capiSpotMarketOptions *capi.SpotMarketOptions) *mapi.SpotMarketOptions {
+	if capiSpotMarketOptions == nil {
+		return nil
+	}
+	return &mapi.SpotMarketOptions{
+		MaxPrice: capiSpotMarketOptions.MaxPrice,
+	}
+}
+
+func convertAWSBlockDeviceMappingSpecToMAPI(rootVolume *capi.Volume, nonRootVolumes []capi.Volume) []mapi.BlockDeviceMappingSpec {
+	blockDeviceMapping := []mapi.BlockDeviceMappingSpec{}
+
+	blockDeviceMapping = append(blockDeviceMapping, mapi.BlockDeviceMappingSpec{
+		EBS: &mapi.EBSBlockDeviceSpec{
+			VolumeSize: &rootVolume.Size,
+			VolumeType: &rootVolume.Type,
+			Iops:       &rootVolume.IOPS,
+			Encrypted:  &rootVolume.Encrypted,
+			KMSKey:     convertKMSKeyToMAPI(rootVolume.EncryptionKey),
+		},
+	})
+
+	for _, volume := range nonRootVolumes {
+		blockDeviceMapping = append(blockDeviceMapping, mapi.BlockDeviceMappingSpec{
+			DeviceName: &volume.DeviceName,
+			EBS: &mapi.EBSBlockDeviceSpec{
+				VolumeSize: &volume.Size,
+				VolumeType: &volume.Type,
+				Iops:       &volume.IOPS,
+				Encrypted:  &volume.Encrypted,
+				KMSKey:     convertKMSKeyToMAPI(volume.EncryptionKey),
+			},
+		})
+	}
+
+	return blockDeviceMapping
+}
+
+// TODO: fix this conversion
+// It’s not possible to convert KMSKey back to MAPI, because upstream uses string type to represent ID or ARN.
+// We are using AWSResourceReference, this means that during conversion we can’t know where to map string to ID or ARN.
+func convertKMSKeyToMAPI(kmsKey string) mapi.AWSResourceReference {
+	return mapi.AWSResourceReference{
+		ID: &kmsKey,
+	}
+}
+
+func convertMachineSetToMAPI(capiMachineSet *capi.MachineSet, rawProviderConfig *runtime.RawExtension) *mapi.MachineSet {
+	mapiMachineSet := &mapi.MachineSet{}
+	mapiMachineSet.ObjectMeta = metav1.ObjectMeta{
+		Name:      capiMachineSet.Name,
+		Namespace: capiMachineSet.Namespace,
+	}
+	mapiMachineSet.TypeMeta = metav1.TypeMeta{
+		Kind:       mapiMachineSetKind,
+		APIVersion: mapiMachineSetAPIVersion,
+	}
+	mapiMachineSet.Spec.Selector = capiMachineSet.Spec.Selector
+	mapiMachineSet.Spec.Template.Labels = capiMachineSet.Spec.Template.Labels
+	mapiMachineSet.Spec.Replicas = capiMachineSet.Spec.Replicas
+	mapiMachineSet.Spec.Template.Spec.ProviderSpec = mapi.ProviderSpec{
+		Value: rawProviderConfig,
+	}
+
+	return mapiMachineSet
 }

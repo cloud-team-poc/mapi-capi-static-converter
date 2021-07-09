@@ -1,3 +1,5 @@
 bin/
-input.yaml
+input*
 output*
+ms.yaml
+mstmpl.yaml
