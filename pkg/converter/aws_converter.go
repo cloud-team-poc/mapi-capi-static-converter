@@ -350,9 +350,6 @@ func convertAWSBlockDeviceMappingSpecToMAPI(rootVolume *capi.Volume, nonRootVolu
 	return blockDeviceMapping
 }
 
-// TODO: fix this conversion
-// It’s not possible to convert KMSKey back to MAPI, because upstream uses string type to represent ID or ARN.
-// We are using AWSResourceReference, this means that during conversion we can’t know where to map string to ID or ARN.
 func convertKMSKeyToMAPI(kmsKey string) mapi.AWSResourceReference {
 	return mapi.AWSResourceReference{
 		ID: &kmsKey,
